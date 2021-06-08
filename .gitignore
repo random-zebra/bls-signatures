@@ -1,6 +1,7 @@
 CMakeCache.txt
 CMakeFiles
 cmake_install.cmake
+cmake-build*/
 Makefile
 src/bench
 src/test
@@ -37,6 +38,7 @@ blstest.*
 blsbench
 blsbench.*
 
+.deps
 .dirstamp
 .libs
 .*.swp
@@ -51,6 +53,12 @@ blsbench.*
 *.a
 *.pb.cc
 *.pb.h
+*.Po
+*.lo
+*.la
+
+runbench
+runtest
 
 **/.DS_Store
 
@@ -58,3 +66,29 @@ blsbench.*
 venv
 yarn-error.log
 /.project
+
+# autoreconf
+Makefile.in
+aclocal.m4
+autom4te.cache/
+build-aux/config.guess
+build-aux/config.sub
+build-aux/depcomp
+build-aux/install-sh
+build-aux/ltmain.sh
+build-aux/m4/libtool.m4
+build-aux/m4/lt~obsolete.m4
+build-aux/m4/ltoptions.m4
+build-aux/m4/ltsugar.m4
+build-aux/m4/ltversion.m4
+build-aux/missing
+build-aux/compile
+build-aux/test-driver
+config.log
+config.status
+configure
+confdefs.h
+conftest.cpp
+conftest.err
+libtool
+contrib/relic/include/stamp-h1
