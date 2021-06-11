@@ -41,6 +41,7 @@ add_library(blstmp ${HEADERS}
   ${CMAKE_CURRENT_SOURCE_DIR}/bls.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/elements.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/schemes.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/threshold.cpp
 )
 
 set(OPREFIX object_)
