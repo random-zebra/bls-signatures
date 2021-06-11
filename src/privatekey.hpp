@@ -26,6 +26,8 @@
 namespace bls {
 class PrivateKey {
  public:
+    PrivateKey();
+
     // Private keys are represented as 32 byte field elements. Note that
     // not all 32 byte integers are valid keys, the private key must be
     // less than the group order (which is in bls.hpp).
@@ -79,9 +81,6 @@ class PrivateKey {
         size_t dst_len) const;
     
  private:
-    // Don't allow public construction, force static methods
-    PrivateKey();
-
     // Allocate memory for private key
     void AllocateKeyData();
     /// Throw an error if keydata isn't initialized
