@@ -1167,6 +1167,86 @@ TEST_CASE("Schemes") {
     }
 }
 
+TEST_CASE("Threshold Signatures") {
+    SECTION("Secret Key Shares") {
+        size_t m = 3;
+        size_t n = 5;
+
+        std::vector<PrivateKey> sks;
+        std::vector<G1Element> pks;
+        std::vector<G2Element> sigs;
+        std::vector<std::vector<uint8_t>> idHashes(n);
+        std::vector<Bytes> ids;
+        std::vector<PrivateKey> skShares;
+        std::vector<G1Element> pkShares;
+        std::vector<G2Element> sigShares;
+
+        std::vector<uint8_t> vecHash = getRandomSeed();
+
+        for (size_t i = 0; i < n; i++) {
+            idHashes[i] = getRandomSeed();
+        }
+        ids = std::vector<Bytes>(idHashes.begin(), idHashes.end());
+
+        for (size_t i = 0; i < m; i++) {
+            std::vector<uint8_t> buf = getRandomSeed();
+
+            PrivateKey sk = PrivateKey::FromByteVector(buf, true);
+            sks.push_back(sk);
+            pks.push_back(sk.GetG1Element());
+            sigs.push_back(bls::Threshold::Sign(sk, Bytes(vecHash)));
+            ASSERT(bls::Threshold::Verify(sk.GetG1Element(), Bytes(vecHash), sigs.back()));
+        }
+
+        G2Element sig = bls::Threshold::Sign(sks[0], Bytes(vecHash));
+
+        REQUIRE(bls::Threshold::Verify({pks[0]}, Bytes{vecHash}, {sig}));
+
+        for (size_t i = 0; i < n; i++) {
+            PrivateKey skShare = bls::Threshold::PrivateKeyShare(sks, ids[i]);
+            G1Element pkShare = bls::Threshold::PublicKeyShare(pks, ids[i]);
+            G2Element sigShare1 = bls::Threshold::SignatureShare(sigs, ids[i]);
+            REQUIRE(skShare.GetG1Element() == pkShare);
+
+            G2Element sigShare2 = bls::Threshold::Sign(skShare, Bytes(vecHash));
+            REQUIRE(sigShare1 == sigShare2);
+            REQUIRE(bls::Threshold::Verify({pkShare}, Bytes(vecHash), {sigShare1}));
+
+            skShares.push_back(skShare);
+            pkShares.push_back(pkShare);
+            sigShares.push_back(sigShare1);
+        }
+
+        std::vector<PrivateKey> rsks;
+        std::vector<G1Element> rpks;
+        std::vector<G2Element> rsigs;
+        std::vector<Bytes> rids;
+        for (size_t i = 0; i < 2; i++) {
+            rsks.push_back(skShares[i]);
+            rpks.push_back(pkShares[i]);
+            rsigs.push_back(sigShares[i]);
+            rids.push_back(ids[i]);
+        }
+        PrivateKey recSk = bls::Threshold::PrivateKeyRecover(rsks, rids);
+        G1Element recPk = bls::Threshold::PublicKeyRecover(rpks, rids);
+        G2Element recSig = bls::Threshold::SignatureRecover(rsigs, rids);
+        REQUIRE(recSk != sks[0]);
+        REQUIRE(recPk != pks[0]);
+        REQUIRE(recSig != sig);
+
+        rsks.push_back(skShares[2]);
+        rpks.push_back(pkShares[2]);
+        rsigs.push_back(sigShares[2]);
+        rids.push_back(ids[2]);
+        recSk = bls::Threshold::PrivateKeyRecover(rsks, rids);
+        recPk = bls::Threshold::PublicKeyRecover(rpks, rids);
+        recSig = bls::Threshold::SignatureRecover(rsigs, rids);
+        REQUIRE(recSk == sks[0]);
+        REQUIRE(recPk == pks[0]);
+        REQUIRE(recSig == sig);
+    }
+}
+
 int main(int argc, char* argv[])
 {
     int result = Catch::Session().run(argc, argv);
