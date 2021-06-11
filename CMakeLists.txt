@@ -8,11 +8,9 @@ ENDIF()
 
 project(BLS)
 
-set(BUILD_BLS_PYTHON_BINDINGS 1 CACHE INTEGER "")
 set(BUILD_BLS_TESTS 1 CACHE INTEGER "")
 set(BUILD_BLS_BENCHMARKS 1 CACHE INTEGER "")
 
-message(STATUS "Build python bindings: ${BUILD_BLS_PYTHON_BINDINGS}")
 message(STATUS "Build tests: ${BUILD_BLS_TESTS}")
 message(STATUS "Build benchmarks: ${BUILD_BLS_BENCHMARKS}")
 
@@ -22,12 +20,6 @@ set(CMAKE_MODULE_PATH
 	${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules
 )
 
-# Make sure to statically link libsodium when building wheels on ci
-if(DEFINED ENV{CIBUILDWHEEL})
-  set(sodium_USE_STATIC_LIBS TRUE)
-  message("libsodium will be statically linked because $CIBUILDWHEEL is defined.")
-endif()
-
 find_package(sodium)
 if (SODIUM_FOUND)
   message(STATUS "Found libsodium")
@@ -36,10 +28,10 @@ if (SODIUM_FOUND)
   include_directories(${sodium_INCLUDE_DIR})
 endif()
 
-set(STBIN TRUE)
 find_package(gmp)
 if (GMP_FOUND)
   message(STATUS "Found libgmp")
+  include_directories(${GMP_INCLUDE_DIR})
   set(ARITH "gmp" CACHE STRING "")
 else()
   set(ARITH "easy" CACHE STRING "")
