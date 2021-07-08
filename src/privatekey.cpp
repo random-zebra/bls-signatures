@@ -166,8 +166,6 @@ PrivateKey operator*(const PrivateKey& k, const bn_t& a)
     return ret;
 }
 
-PrivateKey operator*(const bn_t& a, const PrivateKey& k) { return a * k; }
-
 G2Element PrivateKey::GetG2Power(const G2Element& element) const
 {
     CheckKeyData();
