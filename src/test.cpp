@@ -1245,6 +1245,240 @@ TEST_CASE("Threshold Signatures") {
         REQUIRE(recPk == pks[0]);
         REQUIRE(recSig == sig);
     }
+
+
+    typedef std::vector<uint8_t> RawData;
+
+    struct RecvShare {
+        PrivateKey skShare;
+        G1Element pkShare;
+        std::vector<G1Element> verifVec;
+    };
+
+    class Participant {
+    public:
+        // Unique identifier
+        RawData id;
+        // Free coefficient of S(x)
+        PrivateKey sk;
+        // Free coefficient of P(x)
+        G1Element pk;
+        // Coefficients vectors
+        std::vector<PrivateKey> sks;
+        std::vector<G1Element> pks;
+        std::vector<G2Element> sigs;
+        // Internal shares (contributions)
+        std::map<RawData, PrivateKey> sksShares;
+        std::map<RawData, G1Element> pksShares;
+
+        // Map of received shares from each participant id.
+        std::map<RawData, RecvShare> recvShares;
+
+        // The sk generated from the aggregation of all of the received sks shares (contributions).
+        PrivateKey skShare;
+
+        // Map of received aggrSig from each participant id.
+        std::map<RawData, G2Element> recvAggrSigs;
+
+        bool recvShareAndVerificationVector(RawData fromId, const PrivateKey& share, const std::vector<G1Element>& verifVec) {
+            G1Element evalPubShare = bls::Threshold::PublicKeyShare(verifVec, Bytes(id));
+            REQUIRE(share.GetG1Element() == evalPubShare);
+            recvShares.emplace(std::move(fromId), RecvShare{share, evalPubShare, verifVec});
+            return true;
+        }
+        void recvAggrSigsFrom(RawData& fromId, const G2Element& sigShare) {
+            recvAggrSigs.emplace(fromId, sigShare);
+        }
+    };
+
+    auto randPrivKey = [&]() {
+      RawData buf = getRandomSeed();
+      return PrivateKey::FromByteVector(buf, true);
+    };
+
+    auto randValue = [&](int mod, std::vector<int>& blockValues) {
+      uint8_t val = 0;
+      do { val = getRandomSeed()[0] % mod; } while (std::find(blockValues.begin(), blockValues.end(), val) != blockValues.end());
+      return val;
+    };
+
+    SECTION("Aggregated SSSS") {
+        size_t m = 3;
+        size_t n = 5;
+
+        // First create the participants and their secrets
+        std::vector<Participant> participants;
+        for (int i=0; i < n ; i++) {
+            Participant participant;
+            participant.id = getRandomSeed();
+            participant.sk = randPrivKey();
+            participant.pk = participant.sk.GetG1Element();
+
+            // Create the vectors' coefficients
+            participant.sks.emplace_back(participant.sk);
+            participant.pks.emplace_back(participant.pk);
+            for (int j = 0; j < (m-1); j++) {
+                auto sk = randPrivKey();
+                participant.sks.emplace_back(sk);
+                participant.pks.emplace_back(sk.GetG1Element());
+            }
+            participants.emplace_back(participant);
+        }
+
+        // Second, create shares for every other participant
+        for (Participant& participant : participants) {
+            for (int j=0; j < n; j++) {
+                RawData id = participants[j].id;
+                participant.sksShares.emplace(id, bls::Threshold::PrivateKeyShare(participant.sks, Bytes(id)));
+                participant.pksShares.emplace(id, bls::Threshold::PublicKeyShare(participant.pks, Bytes(id)));
+                REQUIRE(participant.sksShares[id].GetG1Element() == participant.pksShares[id]);
+            }
+        }
+
+        // Third, send shares and verification vectors
+        for (Participant& participant : participants) {
+            for (int j=0; j < n; j++) {
+                auto& recipient = participants[j];
+                RawData destId = recipient.id;
+                // S(x) evaluated in participant1.id.
+                PrivateKey skShare = participant.sksShares.at(destId);
+                // Participant P(x) coefficients.
+                std::vector<G1Element> verificationVector = participant.pks;
+                // Now let's verify skShare with the verification vector.
+                // evaluating the verification vector with the participant id.
+                recipient.recvShareAndVerificationVector(participant.id, skShare, verificationVector);
+            }
+        }
+
+        // Fourth, now that everyone has everyone's shares and verification vectors, let's aggregate all of them to create each aggregated sk
+        // This is done aggregating every received sk share + the participant S(id) own share.
+        // Then verify it against the evaluated Pa(id)
+        for (Participant& participant : participants) {
+            std::vector<PrivateKey> skSharedPrivKeys;
+            std::vector<G1Element> pkShares;
+            for (const auto& sharesById : participant.recvShares) {
+                skSharedPrivKeys.emplace_back(sharesById.second.skShare);
+                pkShares.emplace_back(sharesById.second.pkShare);
+            }
+            PrivateKey aggregatedSharedKey = PrivateKey::Aggregate(skSharedPrivKeys);
+            // Now let's verify that the public key of Sa(participant2_id) is equal to Pa(participant2_id)
+            // For that.. let's aggregate all of the verification vectors evaluated at participant2_id.
+            G1Element aggregatedPk;
+            for (const auto& pkShare : pkShares) {
+                aggregatedPk = !aggregatedPk.IsValid() ? pkShare : aggregatedPk + pkShare;
+            }
+            REQUIRE(aggregatedSharedKey.GetG1Element() == aggregatedPk);
+            participant.skShare = aggregatedSharedKey;
+        }
+
+        // Fifth, now that everyone has its own aggrKey, let's sign a common message with it and check if can everyone can recover the SIGa() free coefficient.
+        // Then verify that the recovered G2Element validates with the recovered G1Element (lagrange interpolation results for SIGa() and Pa() respectively)
+
+        // Let's aggregate all the verification vectors to obtain Pa():
+        std::vector<G1Element> finalVerifVector;
+        for (auto& participant : participants) {
+            if (finalVerifVector.empty()) {
+                finalVerifVector = participant.pks;
+            } else {
+                // Aggregate the vectors
+                std::vector<G1Element> verifVectorInternal(finalVerifVector.size());
+                for (int i = 0; i < finalVerifVector.size(); i++) {
+                    auto& coefficient = finalVerifVector.at(i);
+                    auto& coefficient2 = participant.pks.at(i);
+                    verifVectorInternal[i] = coefficient + coefficient2;
+                }
+                finalVerifVector = verifVectorInternal;
+            }
+        }
+
+        // Data to be signed.
+        std::vector<uint8_t> msgHash = getRandomSeed();
+        for (auto& participant : participants) {
+            // Load SIG() polynomial coefficients vector
+            for (int i = 0; i < m; i++) {
+                PrivateKey sk = participant.sks[i];
+                G1Element pk = participant.pks[i];
+                G2Element sig = bls::Threshold::Sign(sk, Bytes(msgHash));
+                participant.sigs.emplace_back(sig);
+                REQUIRE(bls::Threshold::Verify(pk, Bytes(msgHash), {sig}));
+            }
+
+            // Craft the participant.skShare sig
+            G2Element aggrSig = bls::Threshold::Sign(participant.skShare, Bytes(msgHash));
+            // Send it to every other participant which will receive the
+            // aggrSig and validate that corresponds to Pa() --> checking Pa(id) == participant.aggrPk
+            G1Element aggrPk = bls::Threshold::PublicKeyShare(finalVerifVector, Bytes(participant.id));
+            REQUIRE(aggrPk == participant.skShare.GetG1Element());
+            REQUIRE(bls::Threshold::Verify(aggrPk, Bytes(msgHash), {aggrSig}));
+            for (auto& recipient : participants) {
+                recipient.recvAggrSigsFrom(participant.id, aggrSig);
+            }
+        }
+
+        // Let's aggregate all the SIGx() vectors to obtain SIGa():
+        std::vector<G2Element> finalSIGVector;
+        for (auto& participant : participants) {
+            if (finalSIGVector.empty()) {
+                finalSIGVector = participant.sigs;
+            } else {
+                std::vector<G2Element> sigsVectorInternal(finalSIGVector.size());
+                for (int i = 0; i < finalSIGVector.size(); i++) {
+                    sigsVectorInternal[i] = finalSIGVector.at(i) + participant.sigs.at(i);
+                }
+                finalSIGVector = sigsVectorInternal;
+            }
+        }
+
+        // Now that everyone has everyone's sigs, let's take a participant at random and remove some sigs, then try to recover and validate SIGa(0)
+        for (int i=0; i < 10; i++) {
+            std::vector<int> blockedParticipants;
+            Participant p = participants[randValue((int)participants.size(), blockedParticipants)];
+            // Block two participants at random
+            blockedParticipants.emplace_back(randValue((int)participants.size(), blockedParticipants));
+            blockedParticipants.emplace_back(randValue((int)participants.size(), blockedParticipants));
+            std::vector<RawData> blockedIds;
+            for (const auto& pos : blockedParticipants) {
+                blockedIds.emplace_back(participants[pos].id);
+            }
+
+            // Gather sigs and ids.
+            std::vector<G2Element> aggrSigs;
+            std::vector<Bytes> ids;
+            for (const auto& recvSigShare : p.recvAggrSigs) {
+                if (std::find(blockedIds.begin(), blockedIds.end(), recvSigShare.first) != blockedIds.end()) continue;
+                ids.emplace_back(recvSigShare.first);
+                aggrSigs.emplace_back(recvSigShare.second);
+            }
+
+            G2Element freeCoefficientSigs = bls::Threshold::SignatureRecover(aggrSigs, ids);
+            REQUIRE(freeCoefficientSigs == finalSIGVector[0]);
+            // This will validate against Pa(0)!
+            G1Element freeCoefficientPks = finalVerifVector[0];
+            REQUIRE(bls::Threshold::Verify(freeCoefficientPks, Bytes(msgHash), freeCoefficientSigs));
+
+            // And.. as a final check, let's craft Sa(0)
+            std::vector<PrivateKey> aggrKeys;
+            std::vector<Bytes> ids3;
+            for (const auto& participant : participants) {
+                if (std::find(blockedIds.begin(), blockedIds.end(), participant.id) != blockedIds.end()) continue;
+                aggrKeys.emplace_back(participant.skShare);
+                ids3.emplace_back(participant.id);
+            }
+            // Now recover the free coefficient of Sa()
+            PrivateKey finalKey = bls::Threshold::PrivateKeyRecover(aggrKeys, ids3);
+            REQUIRE(finalKey.GetG1Element() == freeCoefficientPks);
+            REQUIRE(bls::Threshold::Sign(finalKey, Bytes(msgHash)) == freeCoefficientSigs);
+
+            // Now let's add one valid sig share and check that can recover the free coefficient correctly.
+            Participant extraParticipant = participants[blockedParticipants.back()];
+            auto extraRecvAggrSigs = p.recvAggrSigs[extraParticipant.id];
+            ids.emplace_back(extraParticipant.id);
+            aggrSigs.emplace_back(extraRecvAggrSigs);
+            G2Element freeCoefficientSigs2 = bls::Threshold::SignatureRecover(aggrSigs, ids);
+            REQUIRE(freeCoefficientSigs2.IsValid());
+            REQUIRE(bls::Threshold::Verify(freeCoefficientPks, Bytes(msgHash), freeCoefficientSigs2));
+        }
+    }
 }
 
 int main(int argc, char* argv[])
