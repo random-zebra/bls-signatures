@@ -277,8 +277,8 @@ namespace bls {
         return Poly::Evaluate(pks, id);
     }
 
-    G1Element Threshold::PublicKeyRecover(const std::vector<G1Element>& sks, const std::vector<Bytes>& ids) {
-        return Poly::LagrangeInterpolate(sks, ids);
+    G1Element Threshold::PublicKeyRecover(const std::vector<G1Element>& pks, const std::vector<Bytes>& ids) {
+        return Poly::LagrangeInterpolate(pks, ids);
     }
 
     G2Element Threshold::SignatureShare(const std::vector<G2Element>& sigs, const Bytes& id) {

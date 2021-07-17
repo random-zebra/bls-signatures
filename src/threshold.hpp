@@ -16,9 +16,9 @@ namespace bls {
         PrivateKey PrivateKeyRecover(const std::vector<PrivateKey>& sks, const std::vector<Bytes>& ids);
 
         G1Element PublicKeyShare(const std::vector<G1Element>& pks, const Bytes& id);
-        G1Element PublicKeyRecover(const std::vector<G1Element>& sks, const std::vector<Bytes>& ids);
+        G1Element PublicKeyRecover(const std::vector<G1Element>& pks, const std::vector<Bytes>& ids);
 
-        G2Element SignatureShare(const std::vector<G2Element>& sks, const Bytes& id);
+        G2Element SignatureShare(const std::vector<G2Element>& sigs, const Bytes& id);
         G2Element SignatureRecover(const std::vector<G2Element>& sigs, const std::vector<Bytes>& ids);
 
         G2Element Sign(const PrivateKey& privateKey, const Bytes& vecMessage);
