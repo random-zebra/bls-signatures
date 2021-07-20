@@ -1450,6 +1450,8 @@ TEST_CASE("Threshold Signatures") {
                 aggrSigs.emplace_back(recvSigShare.second);
             }
 
+            REQUIRE(aggrSigs.size() == m);
+
             G2Element freeCoefficientSigs = bls::Threshold::SignatureRecover(aggrSigs, ids);
             REQUIRE(freeCoefficientSigs == finalSIGVector[0]);
             // This will validate against Pa(0)!
@@ -1477,6 +1479,12 @@ TEST_CASE("Threshold Signatures") {
             G2Element freeCoefficientSigs2 = bls::Threshold::SignatureRecover(aggrSigs, ids);
             REQUIRE(freeCoefficientSigs2.IsValid());
             REQUIRE(bls::Threshold::Verify(freeCoefficientPks, Bytes(msgHash), freeCoefficientSigs2));
+
+            // Now let's modify one sig share, aggregate again, and check that verification fails
+            aggrSigs[0] += G2Element::Generator();
+            G2Element freeCoefficientSigs3 = bls::Threshold::SignatureRecover(aggrSigs, ids);
+            REQUIRE(freeCoefficientSigs3.IsValid());
+            REQUIRE(!bls::Threshold::Verify(freeCoefficientPks, Bytes(msgHash), freeCoefficientSigs3));
         }
     }
 }
