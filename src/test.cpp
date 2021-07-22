@@ -1263,10 +1263,11 @@ TEST_CASE("Threshold Signatures") {
         PrivateKey sk;
         // Free coefficient of P(x)
         G1Element pk;
+        // Free coefficient of SIG(x)
+        G2Element sig;
         // Coefficients vectors
         std::vector<PrivateKey> sks;
         std::vector<G1Element> pks;
-        std::vector<G2Element> sigs;
         // Internal shares (contributions)
         std::map<RawData, PrivateKey> sksShares;
         std::map<RawData, G1Element> pksShares;
@@ -1375,34 +1376,18 @@ TEST_CASE("Threshold Signatures") {
         // Then verify that the recovered G2Element validates with the recovered G1Element (lagrange interpolation results for SIGa() and Pa() respectively)
 
         // Let's aggregate all the verification vectors to obtain Pa():
-        std::vector<G1Element> finalVerifVector;
-        for (auto& participant : participants) {
-            if (finalVerifVector.empty()) {
-                finalVerifVector = participant.pks;
-            } else {
-                // Aggregate the vectors
-                std::vector<G1Element> verifVectorInternal(finalVerifVector.size());
-                for (int i = 0; i < finalVerifVector.size(); i++) {
-                    auto& coefficient = finalVerifVector.at(i);
-                    auto& coefficient2 = participant.pks.at(i);
-                    verifVectorInternal[i] = coefficient + coefficient2;
-                }
-                finalVerifVector = verifVectorInternal;
+        std::vector<G1Element> finalVerifVector(participants[0].pks);
+        for (int j = 1; j < participants.size(); j++) {
+            for (int i = 0; i < finalVerifVector.size(); i++) {
+                finalVerifVector[i] += participants[j].pks.at(i);
             }
         }
 
         // Data to be signed.
         std::vector<uint8_t> msgHash = getRandomSeed();
         for (auto& participant : participants) {
-            // Load SIG() polynomial coefficients vector
-            for (int i = 0; i < m; i++) {
-                PrivateKey sk = participant.sks[i];
-                G1Element pk = participant.pks[i];
-                G2Element sig = bls::Threshold::Sign(sk, Bytes(msgHash));
-                participant.sigs.emplace_back(sig);
-                REQUIRE(bls::Threshold::Verify(pk, Bytes(msgHash), {sig}));
-            }
-
+            // Load SiG(0) value for each participant
+            participant.sig = bls::Threshold::Sign(participant.sk, Bytes(msgHash));
             // Craft the participant.skShare sig
             G2Element aggrSig = bls::Threshold::Sign(participant.skShare, Bytes(msgHash));
             // Send it to every other participant which will receive the
@@ -1415,18 +1400,11 @@ TEST_CASE("Threshold Signatures") {
             }
         }
 
-        // Let's aggregate all the SIGx() vectors to obtain SIGa():
-        std::vector<G2Element> finalSIGVector;
-        for (auto& participant : participants) {
-            if (finalSIGVector.empty()) {
-                finalSIGVector = participant.sigs;
-            } else {
-                std::vector<G2Element> sigsVectorInternal(finalSIGVector.size());
-                for (int i = 0; i < finalSIGVector.size(); i++) {
-                    sigsVectorInternal[i] = finalSIGVector.at(i) + participant.sigs.at(i);
-                }
-                finalSIGVector = sigsVectorInternal;
-            }
+        // Let's aggregate all the SIG(0) values to obtain SIGa(0)
+        // This will be checked for equality against the recovered threshold signature
+        G2Element finalSIG = participants[0].sig;
+        for (int j = 1; j < participants.size(); j++) {
+            finalSIG += participants[j].sig;
         }
 
         // Now that everyone has everyone's sigs, let's take a participant at random and remove some sigs, then try to recover and validate SIGa(0)
@@ -1453,7 +1431,7 @@ TEST_CASE("Threshold Signatures") {
             REQUIRE(aggrSigs.size() == m);
 
             G2Element freeCoefficientSigs = bls::Threshold::SignatureRecover(aggrSigs, ids);
-            REQUIRE(freeCoefficientSigs == finalSIGVector[0]);
+            REQUIRE(freeCoefficientSigs == finalSIG);
             // This will validate against Pa(0)!
             G1Element freeCoefficientPks = finalVerifVector[0];
             REQUIRE(bls::Threshold::Verify(freeCoefficientPks, Bytes(msgHash), freeCoefficientSigs));
